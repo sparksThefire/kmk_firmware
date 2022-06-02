@@ -71,6 +71,31 @@ def gesc_released(key, keyboard, KC, *args, **kwargs):
     return keyboard
 
 
+def grave_accent_pressed(key, keyboard, KC, *args, **kwargs):
+    GESC_TRIGGERS = {KC.LSHIFT, KC.RSHIFT, KC.LGUI, KC.RGUI}
+
+    if GESC_TRIGGERS.intersection(keyboard.keys_pressed):
+        # First, release GUI if already pressed
+        keyboard._send_hid()
+        # if Shift is held, KC_GRAVE will become KC_TILDE on OS level
+        keyboard.keys_pressed.add(KC.TILDE)
+        keyboard.hid_pending = True
+        return keyboard
+
+    # else return KC_ESC
+    keyboard.keys_pressed.add(KC.GRAVE)
+    keyboard.hid_pending = True
+
+    return keyboard
+
+
+def grave_accent_released(key, keyboard, KC, *args, **kwargs):
+    keyboard.keys_pressed.discard(KC.TILDE)
+    keyboard.keys_pressed.discard(KC.GRAVE)
+    keyboard.hid_pending = True
+    return keyboard
+
+
 def bkdl_pressed(key, keyboard, KC, *args, **kwargs):
     BKDL_TRIGGERS = {KC.LGUI, KC.RGUI}
 
