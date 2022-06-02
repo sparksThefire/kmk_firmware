@@ -11,3 +11,5 @@ class UnicodeMode:
     LINUX = IBUS = const(1)
     MACOS = OSX = RALT = const(2)
     WINC = const(3)
+    ALTX = const(4)
+    ALTPLUS = const(5)

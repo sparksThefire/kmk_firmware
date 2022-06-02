@@ -123,6 +123,14 @@ def unicode_codepoint_sequence(codepoints):
             keyboard.process_key(
                 simple_key_sequence(_winc_unicode_sequence(kc_macros, keyboard)), True
             )
+        elif keyboard.unicode_mode == UnicodeMode.ALTX:
+            keyboard.process_key(
+                simple_key_sequence(_altx_unicode_sequence(kc_macros, keyboard)), True
+            )
+        elif keyboard.unicode_mode == UnicodeMode.ALTPLUS:
+            keyboard.process_key(
+                simple_key_sequence(_altplus_unicode_sequence(kc_macros, keyboard)), True
+            )
 
     return make_key(on_press=_unicode_sequence)
 
@@ -153,3 +161,46 @@ def _winc_unicode_sequence(kc_macros, keyboard):
         yield U_KEY
         yield kc_macro
         yield ENTER_KEY
+
+def _altx_unicode_sequence(kc_macros, keyboard):
+    '''
+    Method of entering unicode characters in windows.
+    This only works inside of apps that use Windows rich text edit control (Word, Outlook, etc.)
+    '''
+    for kc_macro in kc_macros:
+        yield kc_macro
+        yield KC.LALT(KC.X)
+
+def _char_to_numpad(unicode_value):
+    num_to_pad = {
+        '0': 'P0',
+        '1': 'P1',
+        '2': 'P2',
+        '3': 'P3',
+        '4': 'P4',
+        '5': 'P5',
+        '6': 'P6',
+        '7': 'P7',
+        '8': 'P8',
+        '9': 'P9'
+    }
+    for char in unicode_value:
+        if char in num_to_pad.keys:
+            yield num_to_pad[char]
+        else:
+            yield char
+
+
+
+def _altplus_unicode_sequence(kc_macros, keyboard):
+    '''
+    ONLY USE THIS IF YOU KNOW WHAT A REGISTRY KEY IS AND ARE COMFORTABLE CHANGING THEM.
+    Method of entering unicode characters in windows.
+    Requires creating a registry key under HKEY_CURRENT_USER of type REG_SZ called EnableHexNumpad, set its value to 1, and reboot
+    '''
+    # for kc_macro in kc_macros:
+        # yield KC.LALT(KC.NUMPAD_PLUS, kc_macros)
+        # yield KC.LALT(KC.NUMPAD_PLUS, _char_to_numpad(kc_macro))
+    yield kc_macros
+    # yield
+    yield KC.RALT(KC.U, _char_to_numpad(kc_macros))
