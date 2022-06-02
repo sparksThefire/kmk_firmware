@@ -6,7 +6,8 @@ from unittest.mock import Mock, patch
 from kmk.hid import HIDModes
 from kmk.keys import ModifierKey
 from kmk.kmk_keyboard import KMKKeyboard
-from kmk.matrix import DiodeOrientation
+from kmk.scanners import DiodeOrientation
+from kmk.scanners.digitalio import MatrixScanner
 
 
 class DigitalInOut(Mock):
@@ -15,7 +16,12 @@ class DigitalInOut(Mock):
 
 class KeyboardTest:
     def __init__(
-        self, modules, keymap, keyboard_debug_enabled=False, debug_enabled=False
+        self,
+        modules,
+        keymap,
+        keyboard_debug_enabled=False,
+        debug_enabled=False,
+        extensions={},
     ):
         self.debug_enabled = debug_enabled
 
@@ -23,12 +29,18 @@ class KeyboardTest:
         self.keyboard.debug_enabled = keyboard_debug_enabled
 
         self.keyboard.modules = modules
+        self.keyboard.extensions = extensions
 
         self.pins = tuple(DigitalInOut() for k in keymap[0])
 
         self.keyboard.col_pins = (DigitalInOut(),)
         self.keyboard.row_pins = self.pins
         self.keyboard.diode_orientation = DiodeOrientation.COL2ROW
+        self.keyboard.matrix = MatrixScanner(
+            cols=self.keyboard.col_pins,
+            rows=self.keyboard.row_pins,
+            diode_orientation=self.keyboard.diode_orientation,
+        )
         self.keyboard.keymap = keymap
 
         self.keyboard._init(hid_type=HIDModes.NOOP)

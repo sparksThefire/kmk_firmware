@@ -3,7 +3,7 @@
 KMK is configured through a rather large plain-old-Python class called
 `KMKKeyboard`. Subclasses of this configuration exist which pre-fill defaults
 for various known keyboards (for example, many QMK, TMK, or ZMK keyboards 
-are supported with a nice!nano, or through our ItsyBitsy to ProMicro pinout adapter. 
+are supported with a nice!nano, or through our ItsyBitsy to Pro Micro pinout adapter. 
 This class is the main interface between end users and the inner workings of KMK. 
 Let's dive in!
 
@@ -35,7 +35,7 @@ if __name__ == '__main__':
 ```python
 import board
 
-from kmk.matrix import DiodeOrientation
+from kmk.scanners import DiodeOrientation
 
 col_pins = (board.SCK, board.MOSI, board.MISO, board.RX, board.TX, board.D4)
 row_pins = (board.D10, board.D11, board.D12, board.D13, board.D9, board.D6, board.D5, board.SCL)

@@ -4,7 +4,7 @@ from kmk.consts import KMK_RELEASE, UnicodeMode
 from kmk.hid import BLEHID, USBHID, AbstractHID, HIDModes
 from kmk.keys import KC
 from kmk.kmktime import ticks_add, ticks_diff
-from kmk.matrix import MatrixScanner, intify_coordinate
+from kmk.scanners.keypad import MatrixScanner
 
 
 class Sandbox:
@@ -25,7 +25,6 @@ class KMKKeyboard:
     col_pins = None
     diode_orientation = None
     matrix = None
-    matrix_scanner = MatrixScanner
     uart_buffer = []
 
     unicode_mode = UnicodeMode.NOOP
@@ -43,7 +42,6 @@ class KMKKeyboard:
     _hid_helper = None
     _hid_send_enabled = False
     hid_pending = False
-    current_key = None
     matrix_update = None
     secondary_matrix_update = None
     matrix_update_queue = []
@@ -73,7 +71,7 @@ class KMKKeyboard:
             'KMKKeyboard('
             'debug_enabled={} '
             'diode_orientation={} '
-            'matrix_scanner={} '
+            'matrix={} '
             'unicode_mode={} '
             '_hid_helper={} '
             'keys_pressed={} '
@@ -85,7 +83,7 @@ class KMKKeyboard:
         ).format(
             self.debug_enabled,
             self.diode_orientation,
-            self.matrix_scanner,
+            self.matrix,
             self.unicode_mode,
             self._hid_helper,
             # internal state
@@ -137,9 +135,6 @@ class KMKKeyboard:
             if not layer_key or layer_key == KC.TRNS:
                 continue
 
-            if self.debug_enabled:
-                print('KeyResolution(key={})'.format(layer_key))
-
             return layer_key
 
     def _on_matrix_changed(self, kevent):
@@ -148,39 +143,49 @@ class KMKKeyboard:
         if self.debug_enabled:
             print('MatrixChange(ic={} pressed={})'.format(int_coord, is_pressed))
 
+        key = None
         if not is_pressed:
             try:
-                self.current_key = self._coordkeys_pressed[int_coord]
+                key = self._coordkeys_pressed[int_coord]
             except KeyError:
-                print(f'KeyNotPressed(ic={int_coord})')
-            if self.debug_enabled:
-                print('PressedKeyResolution(key={})'.format(self.current_key))
+                if self.debug_enabled:
+                    print(f'KeyNotPressed(ic={int_coord})')
 
-        if self.current_key is None:
-            self.current_key = self._find_key_in_map(int_coord)
+        if key is None:
+            key = self._find_key_in_map(int_coord)
 
-            if self.current_key is None:
-                print('MatrixUndefinedCoordinate(ic={})'.format(int_coord))
+            if key is None:
+                if self.debug_enabled:
+                    print('MatrixUndefinedCoordinate(ic={})'.format(int_coord))
                 return self
 
+        if self.debug_enabled:
+            print('KeyResolution(key={})'.format(key))
+
+        self.pre_process_key(key, is_pressed, int_coord)
+
+    def pre_process_key(self, key, is_pressed, int_coord=None):
         for module in self.modules:
             try:
-                self.current_key = module.process_key(
-                    self, self.current_key, is_pressed, int_coord
-                )
-                if self.current_key is None:
+                key = module.process_key(self, key, is_pressed, int_coord)
+                if key is None:
                     break
             except Exception as err:
                 if self.debug_enabled:
                     print('Failed to run process_key function in module: ', err, module)
 
-        if is_pressed:
-            self._coordkeys_pressed[int_coord] = self.current_key
-        else:
-            del self._coordkeys_pressed[int_coord]
+        if int_coord is not None:
+            if is_pressed:
+                self._coordkeys_pressed[int_coord] = key
+            else:
+                try:
+                    del self._coordkeys_pressed[int_coord]
+                except KeyError:
+                    if self.debug_enabled:
+                        print(f'ReleaseKeyError(ic={int_coord})')
 
-        if self.current_key:
-            self.process_key(self.current_key, is_pressed, int_coord)
+        if key:
+            self.process_key(key, is_pressed, int_coord)
 
         return self
 
@@ -283,23 +288,14 @@ class KMKKeyboard:
         To save RAM on boards that don't use Split, we don't import Split
         and do an isinstance check, but instead do string detection
         '''
-        if self.matrix and self.matrix.coord_mapping:
-            self.coord_mapping = self.matrix.coord_mapping
-
         if any(x.__class__.__module__ == 'kmk.modules.split' for x in self.modules):
             return
 
         if not self.coord_mapping:
-            self.coord_mapping = []
-
-            rows_to_calc = len(self.row_pins)
-            cols_to_calc = len(self.col_pins)
-
-            for ridx in range(rows_to_calc):
-                for cidx in range(cols_to_calc):
-                    self.coord_mapping.append(
-                        intify_coordinate(ridx, cidx, cols_to_calc)
-                    )
+            cm = []
+            for m in self.matrix:
+                cm.extend(m.coord_mapping)
+            self.coord_mapping = tuple(cm)
 
     def _init_hid(self):
         if self.hid_type == HIDModes.NOOP:
@@ -316,18 +312,24 @@ class KMKKeyboard:
     def _init_matrix(self):
         if self.matrix is None:
             if self.debug_enabled:
-                print('Initialising matrix scanner from self.matrix_scanner')
-            self.matrix = self.matrix_scanner(
-                cols=self.col_pins,
-                rows=self.row_pins,
-                diode_orientation=self.diode_orientation,
-                rollover_cols_every_rows=getattr(
-                    self, 'rollover_cols_every_rows', None
-                ),
+                print('Initialising default matrix scanner.')
+            self.matrix = MatrixScanner(
+                column_pins=self.col_pins,
+                row_pins=self.row_pins,
+                columns_to_anodes=self.diode_orientation,
             )
         else:
             if self.debug_enabled:
                 print('Matrix scanner already set, not overwriting.')
+
+        try:
+            self.matrix = tuple(iter(self.matrix))
+            offset = 0
+            for matrix in self.matrix:
+                matrix.offset = offset
+                offset += matrix.key_count
+        except TypeError:
+            self.matrix = (self.matrix,)
 
         return self
 
@@ -337,14 +339,22 @@ class KMKKeyboard:
                 module.before_matrix_scan(self)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run pre matrix function in module: ', err, module)
+                    print(
+                        'Failed to run before matrix scan function in module: ',
+                        err,
+                        module,
+                    )
 
         for ext in self.extensions:
             try:
                 ext.before_matrix_scan(self.sandbox)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run pre matrix function in extension: ', err, ext)
+                    print(
+                        'Failed to run before matrix scan function in extension: ',
+                        err,
+                        ext,
+                    )
 
     def after_matrix_scan(self):
         for module in self.modules:
@@ -352,14 +362,22 @@ class KMKKeyboard:
                 module.after_matrix_scan(self)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run post matrix function in module: ', err, module)
+                    print(
+                        'Failed to run after matrix scan function in module: ',
+                        err,
+                        module,
+                    )
 
         for ext in self.extensions:
             try:
                 ext.after_matrix_scan(self.sandbox)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run post matrix function in extension: ', err, ext)
+                    print(
+                        'Failed to run after matrix scan function in extension: ',
+                        err,
+                        ext,
+                    )
 
     def before_hid_send(self):
         for module in self.modules:
@@ -367,14 +385,22 @@ class KMKKeyboard:
                 module.before_hid_send(self)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run pre hid function in module: ', err, module)
+                    print(
+                        'Failed to run before hid send function in module: ',
+                        err,
+                        module,
+                    )
 
         for ext in self.extensions:
             try:
                 ext.before_hid_send(self.sandbox)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run pre hid function in extension: ', err, ext)
+                    print(
+                        'Failed to run before hid send function in extension: ',
+                        err,
+                        ext,
+                    )
 
     def after_hid_send(self):
         for module in self.modules:
@@ -382,14 +408,18 @@ class KMKKeyboard:
                 module.after_hid_send(self)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run post hid function in module: ', err, module)
+                    print(
+                        'Failed to run after hid send function in module: ', err, module
+                    )
 
         for ext in self.extensions:
             try:
                 ext.after_hid_send(self.sandbox)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run post hid function in extension: ', err, ext)
+                    print(
+                        'Failed to run after hid send function in extension: ', err, ext
+                    )
 
     def powersave_enable(self):
         for module in self.modules:
@@ -397,14 +427,22 @@ class KMKKeyboard:
                 module.on_powersave_enable(self)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run post hid function in module: ', err, module)
+                    print(
+                        'Failed to run on powersave enable function in module: ',
+                        err,
+                        module,
+                    )
 
         for ext in self.extensions:
             try:
                 ext.on_powersave_enable(self.sandbox)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run post hid function in extension: ', err, ext)
+                    print(
+                        'Failed to run on powersave enable function in extension: ',
+                        err,
+                        ext,
+                    )
 
     def powersave_disable(self):
         for module in self.modules:
@@ -412,13 +450,21 @@ class KMKKeyboard:
                 module.on_powersave_disable(self)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run post hid function in module: ', err, module)
+                    print(
+                        'Failed to run on powersave disable function in module: ',
+                        err,
+                        module,
+                    )
         for ext in self.extensions:
             try:
                 ext.on_powersave_disable(self.sandbox)
             except Exception as err:
                 if self.debug_enabled:
-                    print('Failed to run post hid function in extension: ', err, ext)
+                    print(
+                        'Failed to run on powersave disable function in extension: ',
+                        err,
+                        ext,
+                    )
 
     def go(self, hid_type=HIDModes.USB, secondary_hid_type=None, **kwargs):
         self._init(hid_type=hid_type, secondary_hid_type=secondary_hid_type, **kwargs)
@@ -431,9 +477,9 @@ class KMKKeyboard:
         self.secondary_hid_type = secondary_hid_type
 
         self._init_sanity_check()
-        self._init_coord_mapping()
         self._init_hid()
         self._init_matrix()
+        self._init_coord_mapping()
 
         for module in self.modules:
             try:
@@ -452,13 +498,16 @@ class KMKKeyboard:
         self._print_debug_cycle(init=True)
 
     def _main_loop(self):
-        self.current_key = None
         self.state_changed = False
         self.sandbox.active_layers = self.active_layers.copy()
 
         self.before_matrix_scan()
 
-        self.matrix_update = self.sandbox.matrix_update = self.matrix.scan_for_changes()
+        for matrix in self.matrix:
+            update = matrix.scan_for_changes()
+            if update:
+                self.matrix_update = update
+                break
         self.sandbox.secondary_matrix_update = self.secondary_matrix_update
 
         self.after_matrix_scan()

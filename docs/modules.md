@@ -17,6 +17,7 @@ when tapped, and modifier when held.
 - [Power](power.md): Power saving features. This is mostly useful when on battery power.
 - [Split](split_keyboards.md): Keyboards split in two. Seems ergonomic!
 - [TapDance](tapdance.md): Different key actions depending on how often it is pressed.
+- [Dynamic Sequences](dynamic_sequences.md): Records a sequence of keypresses and plays it back.
 
 ### Require Libraries
 These modules can be used without specific hardware, but require additional libraries such as the `Adafruit CircuitPython Bundle`.
@@ -29,4 +30,4 @@ These modules are for specific hardware and may require additional libraries to 
 - [ADNS9800](adns9800.md): Controlling ADNS9800 optical sensor.
 - [Encoder](encoder.md): Handling rotary encoders.
 - [Pimoroni trackball](pimoroni_trackball.md): Handling a small I2C trackball made by Pimoroni.
-- [AS5013 aka. easypoint](easypoint.md): Handling a small I2C magnetic position sensor made by AMS.
+- [AS5013 aka EasyPoint](easypoint.md): Handling a small I2C magnetic position sensor made by AMS.
