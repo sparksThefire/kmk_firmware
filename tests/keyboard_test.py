@@ -1,20 +1,31 @@
-import random
 import time
-from functools import reduce
 from unittest.mock import Mock, patch
 
 from kmk.hid import HIDModes
-from kmk.keys import ModifierKey
+from kmk.keys import KC, ModifierKey
 from kmk.kmk_keyboard import KMKKeyboard
 from kmk.scanners import DiodeOrientation
 from kmk.scanners.digitalio import MatrixScanner
+from kmk.scheduler import _task_queue
 
 
 class DigitalInOut(Mock):
     value = False
 
 
+def code2name(code):
+    for name in KC:
+        try:
+            if KC[name].code == code:
+                return name
+        except AttributeError:
+            pass
+    return code
+
+
 class KeyboardTest:
+    loop_delay_ms = 2
+
     def __init__(
         self,
         modules,
@@ -46,15 +57,16 @@ class KeyboardTest:
         self.keyboard._init(hid_type=HIDModes.NOOP)
 
     @patch('kmk.hid.AbstractHID.hid_send')
-    def test(self, testname, key_events, assert_hid_reports, hid_send):
+    def test(self, testname, key_events, assert_reports, hid_send):
         if self.debug_enabled:
-            print(testname, key_events, assert_hid_reports)
+            print(testname)
 
-        hid_send_call_arg_list = []
-        hid_send.side_effect = lambda hid_report: hid_send_call_arg_list.append(
-            hid_report[1:]
-        )
+        # setup report recording
+        hid_reports = []
+        hid_send.side_effect = lambda report: hid_reports.append(report[1:])
 
+        # inject key switch events
+        self.keyboard._main_loop()
         for e in key_events:
             if isinstance(e, int):
                 starttime_ms = time.time_ns() // 1_000_000
@@ -66,43 +78,57 @@ class KeyboardTest:
                 self.pins[key_pos].value = is_pressed
                 self.do_main_loop()
 
-        if self.debug_enabled:
-            for hid_report in hid_send_call_arg_list:
-                print(hid_report)
+        # wait up to 10s for delayed actions to resolve, if there are any
+        timeout = time.time_ns() + 10 * 1_000_000_000
+        while timeout > time.time_ns():
+            self.do_main_loop()
+            if not _task_queue.peek() and not self.keyboard._resume_buffer:
+                break
+        assert timeout > time.time_ns(), 'infinite loop detected'
 
-        assert len(hid_send_call_arg_list) >= len(assert_hid_reports)
+        matching = True
+        for i in range(max(len(hid_reports), len(assert_reports))):
+            # prepare the generated report codes
+            try:
+                hid_report = hid_reports[i]
+            except IndexError:
+                report_mods = None
+                report_keys = [None]
+            else:
+                report_mods = hid_report[0]
+                report_keys = {code for code in hid_report[2:] if code != 0}
 
-        for i, hid_report in enumerate(
-            hid_send_call_arg_list[-len(assert_hid_reports) :]
-        ):
-            hid_report_keys = {code for code in hid_report[2:] if code != 0}
-            assert_keys = {
-                k.code for k in assert_hid_reports[i] if not isinstance(k, ModifierKey)
-            }
+            # prepare the desired report codes
+            try:
+                hid_assert = assert_reports[i]
+            except IndexError:
+                assert_mods = None
+                assert_keys = [None]
+            else:
+                assert_mods = 0
+                assert_keys = set()
+                for k in hid_assert:
+                    if isinstance(k, ModifierKey):
+                        assert_mods |= k.code
+                    else:
+                        assert_keys.add(k.code)
+
+            # accumulate assertion for late evalution, -- makes for a more
+            # helpfull debug output.
+            matching = matching and report_mods == assert_mods
+            matching = matching and report_keys == assert_keys
+
             if self.debug_enabled:
+                report_keys_names = {code2name(c) for c in report_keys}
+                assert_keys_names = {code2name(c) for c in assert_keys}
                 print(
-                    'assert keys:',
-                    hid_report_keys == assert_keys,
-                    hid_report_keys,
-                    assert_keys,
+                    f'assert '
+                    f'mods: {report_mods} == {assert_mods} '
+                    f'keys: {report_keys_names} == {assert_keys_names} '
                 )
-            assert hid_report_keys == assert_keys
 
-            hid_report_modifiers = hid_report[0]
-            assert_modifiers = reduce(
-                lambda mod, all_mods: all_mods | mod,
-                {k.code for k in assert_hid_reports[i] if isinstance(k, ModifierKey)},
-                0,
-            )
-            if self.debug_enabled:
-                print(
-                    'assert mods:',
-                    hid_report_modifiers == assert_modifiers,
-                    hid_report_modifiers,
-                    assert_modifiers,
-                )
-            assert hid_report_modifiers == assert_modifiers
+        assert matching, "reports don't match up"
 
     def do_main_loop(self):
-        for i in range(random.randint(5, 50)):
-            self.keyboard._main_loop()
+        self.keyboard._main_loop()
+        time.sleep(self.loop_delay_ms / 1000)

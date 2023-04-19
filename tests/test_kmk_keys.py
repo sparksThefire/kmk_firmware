@@ -123,12 +123,10 @@ class TestKeys_dot(unittest.TestCase):
         assert primary_key is secondary_key
 
     def test_invalid_key_upper(self):
-        with self.assertRaises(ValueError):
-            KC.INVALID_KEY
+        assert KC.INVALID_KEY == KC.NO
 
     def test_invalid_key_lower(self):
-        with self.assertRaises(ValueError):
-            KC.invalid_key
+        assert KC.invalid_key == KC.NO
 
     def test_custom_key(self):
         created = make_key(
@@ -168,12 +166,10 @@ class TestKeys_index(unittest.TestCase):
         assert upper_key is lower_key
 
     def test_invalid_key_upper(self):
-        with self.assertRaises(ValueError):
-            KC['NOT_A_VALID_KEY']
+        assert KC.INVALID_KEY == KC.NO
 
     def test_invalid_key_lower(self):
-        with self.assertRaises(ValueError):
-            KC['not_a_valid_key']
+        assert KC.invalid_key == KC.NO
 
     def test_custom_key(self):
         created = make_key(
@@ -218,10 +214,10 @@ class TestKeys_get(unittest.TestCase):
         assert primary_key is secondary_key
 
     def test_invalid_key_upper(self):
-        assert KC.get('INVALID_KEY') is None
+        assert KC.get('INVALID_KEY') is KC.NO
 
     def test_invalid_key_lower(self):
-        assert KC.get('not_a_valid_key') is None
+        assert KC.get('not_a_valid_key') is KC.NO
 
     def test_custom_key(self):
         created = make_key(
@@ -238,6 +234,9 @@ class TestKeys_get(unittest.TestCase):
     def test_match_exactly_case(self):
         created = make_key(names=('ThIs_Is_A_StRaNgE_kEy',))
         assert created is KC.get('ThIs_Is_A_StRaNgE_kEy')
+
+    def test_underscore(self):
+        assert KC.get('_')
 
 
 # Some of these test appear silly, but they're testing we get the
